@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Star Pattern Vinyl</title>
+  <desc id="desc">Black vinyl with white star pattern and red center label.</desc>
+  <defs>
+    <radialGradient id="disc" cx="35%" cy="28%" r="68%">
+      <stop offset="0%" stop-color="#252930"/>
+      <stop offset="62%" stop-color="#0a0c10"/>
+      <stop offset="100%" stop-color="#030407"/>
+    </radialGradient>
+    <radialGradient id="label" cx="35%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#ff3c54"/>
+      <stop offset="100%" stop-color="#aa001a"/>
+    </radialGradient>
+    <radialGradient id="shine" cx="26%" cy="18%" r="48%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="14" height="14" patternUnits="userSpaceOnUse">
+      <circle cx="3" cy="3" r="2.2" fill="#f2f2f2"/>
+    </pattern>
+    <mask id="starsMask">
+      <rect width="1200" height="1200" fill="black"/>
+      <g fill="white">
+        <polygon points="600,90 660,250 840,250 695,350 750,520 600,410 450,520 505,350 360,250 540,250"/>
+        <polygon points="295,180 335,280 445,280 358,345 390,450 295,388 200,450 232,345 145,280 255,280"/>
+        <polygon points="900,210 945,325 1070,325 970,398 1010,522 900,446 790,522 830,398 730,325 855,325"/>
+        <polygon points="270,560 308,656 412,656 330,716 360,815 270,752 180,815 210,716 128,656 232,656"/>
+        <polygon points="860,560 905,675 1030,675 930,748 970,872 860,796 750,872 790,748 690,675 815,675"/>
+        <polygon points="600,720 650,850 785,850 675,930 718,1060 600,978 482,1060 525,930 415,850 550,850"/>
+      </g>
+    </mask>
+  </defs>
+
+  <circle cx="600" cy="600" r="560" fill="url(#disc)"/>
+
+  <g opacity="0.34" stroke="#0d1015" stroke-width="2" fill="none">
+    <circle cx="600" cy="600" r="518"/>
+    <circle cx="600" cy="600" r="496"/>
+    <circle cx="600" cy="600" r="474"/>
+    <circle cx="600" cy="600" r="452"/>
+    <circle cx="600" cy="600" r="430"/>
+    <circle cx="600" cy="600" r="408"/>
+    <circle cx="600" cy="600" r="386"/>
+    <circle cx="600" cy="600" r="364"/>
+    <circle cx="600" cy="600" r="342"/>
+  </g>
+
+  <rect width="1200" height="1200" fill="url(#dots)" opacity="0.95" mask="url(#starsMask)"/>
+
+  <circle cx="600" cy="600" r="170" fill="url(#label)"/>
+  <circle cx="600" cy="600" r="34" fill="#ffedf0" stroke="#24262a" stroke-width="7"/>
+  <circle cx="600" cy="600" r="8" fill="#ffffff"/>
+
+  <circle cx="600" cy="600" r="560" fill="url(#shine)"/>
+</svg>

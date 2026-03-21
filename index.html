@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MD Vinyl for Windows</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2316171b'/%3E%3Ccircle cx='32' cy='32' r='10' fill='%23e9e5dd'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Cinzel:wght@500;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <main class="desktop-shell">
+        <section class="app-window" aria-label="MD Vinyl Player">
+            <div class="window-body">
+                <div class="turntable-panel">
+                    <div class="arm-shadow" aria-hidden="true"></div>
+                    <div class="tonearm" aria-hidden="true">
+                        <span class="tonearm-pivot"></span>
+                        <span class="tonearm-rod"></span>
+                        <span class="tonearm-head"></span>
+                    </div>
+                    <img class="vinyl" src="./images/vinyl-star.svg" alt="Star pattern vinyl record">
+                </div>
+
+                <aside class="info-panel">
+                    <p class="status" id="statusText">Not Launched</p>
+                    <h2 id="trackTitle">Open a music app to start</h2>
+                    <p class="meta">MD Studio 2026</p>
+                    <div class="loader-row">
+                        <span id="fileName" class="file-name">No file selected</span>
+                    </div>
+                    <div id="dropZone" class="drop-zone">Drop audio file or folder here</div>
+                    <div class="folder-connect-row">
+                        <button id="connectFolderBtn" class="folder-connect-btn" type="button">Connect Music Folder</button>
+                        <p id="folderHint" class="folder-hint">Grant folder access to load songs from your laptop.</p>
+                    </div>
+
+                    <section class="playlist-panel side-playlist" aria-label="Playlist">
+                        <h3>Folder Songs</h3>
+                        <p id="playlistNowPlaying" class="now-playing">Now playing: None</p>
+                        <ul id="playlistList" class="playlist-list"></ul>
+                    </section>
+
+                    <div class="timeline-wrap">
+                        <span id="currentTime">0:00</span>
+                        <input id="seekBar" type="range" min="0" max="100" value="0" step="0.1" aria-label="Seek track">
+                        <span id="duration">0:00</span>
+                    </div>
+
+                    <div class="controls" role="group" aria-label="Playback controls">
+                        <div class="control-cluster">
+                            <button id="prevBtn" class="pill" type="button" aria-label="Previous track">&#9664;</button>
+                            <span class="control-label">&#9198;</span>
+                        </div>
+                        <div class="control-cluster">
+                            <button id="playPauseBtn" class="pill" type="button" aria-label="Play or pause">PLAY</button>
+                            <span class="control-label">PLAY</span>
+                        </div>
+                        <div class="control-cluster">
+                            <button id="nextBtn" class="pill" type="button" aria-label="Next track">&#9654;</button>
+                            <span class="control-label">&#9197;</span>
+                        </div>
+                    </div>
+
+                    <div class="volume-row">
+                        <label for="volumeSlider">Volume</label>
+                        <div class="strawberry-meter" aria-hidden="true">
+                            <button id="volumeDownBtn" class="volume-step-btn" type="button" aria-label="Decrease volume">-</button>
+                            <span id="volumeStrawberries" class="big-strawberries">&#127827; &#127827; &#127827; &#127827;</span>
+                            <button id="volumeUpBtn" class="volume-step-btn" type="button" aria-label="Increase volume">+</button>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </section>
+    </main>
+
+    <audio id="audioPlayer" preload="metadata"></audio>
+    <script src="./script.js"></script>
+</body>
+</html>
