@@ -1,4 +1,4 @@
-const audio = document.getElementById("audioPlayer");
+const audio = document.getElementById("player") || document.getElementById("audioPlayer");
 const vinyl = document.querySelector(".vinyl");
 const playPauseBtn = document.getElementById("playPauseBtn");
 const prevBtn = document.getElementById("prevBtn");
@@ -11,7 +11,8 @@ const durationEl = document.getElementById("duration");
 const statusText = document.getElementById("statusText");
 const trackTitle = document.getElementById("trackTitle");
 const fileNameText = document.getElementById("fileName");
-const dropZone = document.getElementById("dropZone");
+const dropZone = document.getElementById("drop-area") || document.getElementById("dropZone");
+const trackFileInput = document.getElementById("trackFileInput");
 const connectFolderBtn = document.getElementById("connectFolderBtn");
 const folderHint = document.getElementById("folderHint");
 const turntablePanel = document.querySelector(".turntable-panel");
@@ -53,7 +54,14 @@ function sortFilesForPlaylist(files) {
 		const right = (b.webkitRelativePath || b.name || "").toLowerCase();
 		return left.localeCompare(right);
 	});
-	if (playlist.length > 1) {
+}
+
+function updateFileNameLabel(file) {
+	if (!fileNameText || !file) {
+		return;
+	}
+
+	if (playlist.length > 1 && playlistIndex >= 0) {
 		fileNameText.textContent = `${playlistIndex + 1}/${playlist.length} ${file.name}`;
 		return;
 	}
@@ -469,30 +477,36 @@ function loadSelectedFile(file, options = {}) {
 	}, 0);
 
 	// Reset input so selecting the same file again still triggers change.
-	trackFileInput.value = "";
+	if (trackFileInput) {
+		trackFileInput.value = "";
+	}
 }
 
-trackFileInput.addEventListener("change", (event) => {
-	const files = Array.from(event.target.files || []);
-	setPlaylist(files, 0, false);
-});
+if (trackFileInput) {
+	trackFileInput.addEventListener("change", (event) => {
+		const files = Array.from(event.target.files || []);
+		setPlaylist(files, 0, false);
+	});
+}
 
-dropZone.addEventListener("dragover", (event) => {
-	event.preventDefault();
-	dropZone.classList.add("drag-over");
-});
+if (dropZone) {
+	dropZone.addEventListener("dragover", (event) => {
+		event.preventDefault();
+		dropZone.classList.add("drag-over");
+	});
 
-dropZone.addEventListener("dragleave", () => {
-	dropZone.classList.remove("drag-over");
-});
+	dropZone.addEventListener("dragleave", () => {
+		dropZone.classList.remove("drag-over");
+	});
 
-dropZone.addEventListener("drop", async (event) => {
-	event.preventDefault();
-	dropZone.classList.remove("drag-over");
-	statusText.textContent = "Scanning dropped files...";
-	const files = await getDroppedAudioFiles(event.dataTransfer);
-	setPlaylist(files, 0, false);
-});
+	dropZone.addEventListener("drop", async (event) => {
+		event.preventDefault();
+		dropZone.classList.remove("drag-over");
+		statusText.textContent = "Scanning dropped files...";
+		const files = await getDroppedAudioFiles(event.dataTransfer);
+		setPlaylist(files, 0, false);
+	});
+}
 
 if (connectFolderBtn) {
 	connectFolderBtn.addEventListener("click", () => {
