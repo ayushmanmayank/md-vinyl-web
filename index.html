@@ -31,11 +31,24 @@
                     <div class="loader-row">
                         <span id="fileName" class="file-name">No file selected</span>
                     </div>
-                    <div id="drop-area" class="drop-zone">Drop audio file or folder here</div>
-                    <div class="folder-connect-row">
-                        <button id="connectFolderBtn" class="folder-connect-btn" type="button">Connect Music Folder</button>
-                        <p id="folderHint" class="folder-hint">Grant folder access to load songs from your laptop.</p>
+                    <div class="source-actions" role="group" aria-label="Audio sources">
+                        <button id="localFileBtn" class="source-btn" type="button">Choose Local Files</button>
+                        <button id="connectFolderBtn" class="source-btn" type="button">Connect Music Folder</button>
                     </div>
+                    <input id="trackFileInput" type="file" accept="audio/*" multiple hidden>
+                    <div class="folder-connect-row">
+                        <p id="folderHint" class="folder-hint">Choose files or connect a folder to load songs from your laptop.</p>
+                    </div>
+
+                    <section class="spotify-panel" aria-label="Spotify Embed">
+                        <h3>Spotify Embed</h3>
+                        <p class="spotify-hint">Paste a Spotify track, album, artist, or playlist link.</p>
+                        <div class="spotify-input-row">
+                            <input id="spotifyUrlInput" class="spotify-url-input" type="text" placeholder="https://open.spotify.com/track/..." aria-label="Spotify URL">
+                            <button id="spotifyLoadBtn" class="spotify-load-btn" type="button">Load</button>
+                        </div>
+                        <div id="spotifyEmbed" class="spotify-embed" aria-label="Spotify player"></div>
+                    </section>
 
                     <section class="playlist-panel side-playlist" aria-label="Playlist">
                         <h3>Folder Songs</h3>
@@ -62,6 +75,11 @@
                             <button id="nextBtn" class="pill" type="button" aria-label="Next track">&#9654;</button>
                             <span class="control-label">&#9197;</span>
                         </div>
+                    </div>
+
+                    <div class="mode-row" role="group" aria-label="Playback modes">
+                        <button id="shuffleBtn" class="mode-pill" type="button" aria-pressed="false">Shuffle Off</button>
+                        <button id="repeatBtn" class="mode-pill" type="button" aria-pressed="false">Repeat Off</button>
                     </div>
 
                     <div class="volume-row">
