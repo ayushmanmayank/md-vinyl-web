@@ -11,14 +11,19 @@ const durationEl = document.getElementById("duration");
 const statusText = document.getElementById("statusText");
 const trackTitle = document.getElementById("trackTitle");
 const fileNameText = document.getElementById("fileName");
-const dropZone = document.getElementById("drop-area") || document.getElementById("dropZone");
 const trackFileInput = document.getElementById("trackFileInput");
+const localFileBtn = document.getElementById("localFileBtn");
 const connectFolderBtn = document.getElementById("connectFolderBtn");
 const folderHint = document.getElementById("folderHint");
 const turntablePanel = document.querySelector(".turntable-panel");
 const playlistList = document.getElementById("playlistList");
 const playlistNowPlaying = document.getElementById("playlistNowPlaying");
 const volumeStrawberries = document.getElementById("volumeStrawberries");
+const spotifyUrlInput = document.getElementById("spotifyUrlInput");
+const spotifyLoadBtn = document.getElementById("spotifyLoadBtn");
+const spotifyEmbed = document.getElementById("spotifyEmbed");
+const shuffleBtn = document.getElementById("shuffleBtn");
+const repeatBtn = document.getElementById("repeatBtn");
 const MAX_VOLUME_LEVEL = 5;
 const MIN_VOLUME_LEVEL = 1;
 
@@ -31,6 +36,424 @@ let playlist = [];
 let playlistIndex = -1;
 let pendingAutoplay = false;
 let volumeLevel = 4;
+let isShuffleEnabled = false;
+let repeatMode = "off";
+let spotifyController = null;
+let spotifyApiPromise = null;
+const spotifyTrackTitleCache = new Map();
+
+function spotifyUriToWebUrl(uri) {
+	if (!uri || typeof uri !== "string") {
+		return "";
+	}
+
+	if (uri.startsWith("https://open.spotify.com/")) {
+		return uri;
+	}
+
+	if (!uri.startsWith("spotify:")) {
+		return "";
+	}
+
+	const parts = uri.split(":");
+	if (parts.length < 3) {
+		return "";
+	}
+
+	return `https://open.spotify.com/${parts[1]}/${parts[2]}`;
+}
+
+async function fetchSpotifyTrackTitleFromUri(uri) {
+	if (!uri || spotifyTrackTitleCache.has(uri)) {
+		return spotifyTrackTitleCache.get(uri) || "";
+	}
+
+	const trackUrl = spotifyUriToWebUrl(uri);
+	if (!trackUrl) {
+		return "";
+	}
+
+	try {
+		const response = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(trackUrl)}`);
+		if (!response.ok) {
+			return "";
+		}
+
+		const payload = await response.json();
+		const title = typeof payload.title === "string" ? payload.title.trim() : "";
+		if (!title) {
+			return "";
+		}
+
+		const cleaned = title.replace(/\s*[\-|\u2013]\s*song by .*$/i, "").trim();
+		spotifyTrackTitleCache.set(uri, cleaned || title);
+		return spotifyTrackTitleCache.get(uri) || "";
+	} catch {
+		return "";
+	}
+}
+
+function extractTitleFromUnknownPayload(payload) {
+	if (!payload || typeof payload !== "object") {
+		return "";
+	}
+
+	const queue = [payload];
+	const seen = new Set();
+
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (!current || typeof current !== "object" || seen.has(current)) {
+			continue;
+		}
+		seen.add(current);
+
+		const candidateUri = typeof current.uri === "string" ? current.uri : "";
+		const candidateName =
+			typeof current.name === "string"
+				? current.name.trim()
+				: typeof current.title === "string"
+					? current.title.trim()
+					: "";
+
+		if (candidateName && (candidateUri.startsWith("spotify:track:") || candidateUri.includes("/track/"))) {
+			return candidateName;
+		}
+
+		for (const value of Object.values(current)) {
+			if (value && typeof value === "object") {
+				queue.push(value);
+			}
+		}
+	}
+
+	return "";
+}
+
+function setDeckAnimation(isPlaying) {
+	vinyl.classList.toggle("spinning", isPlaying);
+	vinyl.classList.toggle("paused", !isPlaying);
+	turntablePanel.classList.toggle("playing", isPlaying);
+	document.body.classList.toggle("music-playing", isPlaying);
+}
+
+function parseSpotifyResource(rawValue) {
+	if (!rawValue) {
+		return null;
+	}
+
+	const input = rawValue.trim();
+	if (!input) {
+		return null;
+	}
+
+	if (input.startsWith("spotify:")) {
+		const parts = input.split(":");
+		if (parts.length >= 3) {
+			const type = parts[1];
+			const id = parts[2];
+			return type && id ? { type, id } : null;
+		}
+		return null;
+	}
+
+	let parsed;
+	try {
+		parsed = new URL(input);
+	} catch {
+		return null;
+	}
+
+	if (!/spotify\.com$/i.test(parsed.hostname)) {
+		return null;
+	}
+
+	const segments = parsed.pathname.split("/").filter(Boolean);
+	if (segments[0] === "embed") {
+		if (segments.length >= 3) {
+			return { type: segments[1], id: segments[2] };
+		}
+		return null;
+	}
+
+	if (segments.length < 2) {
+		return null;
+	}
+
+	return { type: segments[0], id: segments[1] };
+}
+
+function ensureSpotifyIframeApi() {
+	if (window.SpotifyIframeApi && typeof window.SpotifyIframeApi.createController === "function") {
+		return Promise.resolve(window.SpotifyIframeApi);
+	}
+
+	if (spotifyApiPromise) {
+		return spotifyApiPromise;
+	}
+
+	spotifyApiPromise = new Promise((resolve, reject) => {
+		const timeoutId = window.setTimeout(() => {
+			reject(new Error("Spotify API load timeout"));
+		}, 8000);
+
+		window.onSpotifyIframeApiReady = (iframeApi) => {
+			window.clearTimeout(timeoutId);
+			resolve(iframeApi);
+		};
+
+		const existingScript = document.querySelector('script[data-spotify-iframe-api="true"]');
+		if (!existingScript) {
+			const script = document.createElement("script");
+			script.src = "https://open.spotify.com/embed/iframe-api/v1";
+			script.async = true;
+			script.dataset.spotifyIframeApi = "true";
+			script.addEventListener("error", () => {
+				window.clearTimeout(timeoutId);
+				reject(new Error("Spotify API script failed"));
+			});
+			document.body.appendChild(script);
+		}
+	});
+
+	return spotifyApiPromise;
+}
+
+function bindSpotifyPlaybackUpdates(controller) {
+	if (!controller || controller.__mdPlaybackBound) {
+		return;
+	}
+
+	function extractSpotifyTrackTitle(payload) {
+		if (!payload || typeof payload !== "object") {
+			return "";
+		}
+
+		const directTrack = payload.item || payload.track || payload.current_track || null;
+		const nestedTrack =
+			(payload.track_window && payload.track_window.current_track) ||
+			(payload.trackWindow && (payload.trackWindow.current_track || payload.trackWindow.currentTrack)) ||
+			(payload.metadata && (payload.metadata.current_item || payload.metadata.track)) ||
+			null;
+
+		const candidate = directTrack || nestedTrack;
+		if (!candidate || typeof candidate !== "object") {
+			return "";
+		}
+
+		return candidate.name || candidate.title || "";
+	}
+
+	function extractSpotifyTrackUri(payload) {
+		if (!payload || typeof payload !== "object") {
+			return "";
+		}
+
+		const directTrack = payload.item || payload.track || payload.current_track || null;
+		const nestedTrack =
+			(payload.track_window && payload.track_window.current_track) ||
+			(payload.trackWindow && (payload.trackWindow.current_track || payload.trackWindow.currentTrack)) ||
+			(payload.metadata && (payload.metadata.current_item || payload.metadata.track)) ||
+			null;
+
+		const candidate = directTrack || nestedTrack;
+		const rawUri =
+			(candidate && (candidate.uri || candidate.external_urls?.spotify || candidate.link)) ||
+			payload.uri ||
+			payload.currentURI ||
+			payload.current_uri ||
+			"";
+
+		return typeof rawUri === "string" ? rawUri : "";
+	}
+
+	async function applySpotifyTitleFromPayload(payload) {
+		const directTitle = extractSpotifyTrackTitle(payload) || extractTitleFromUnknownPayload(payload);
+		if (directTitle) {
+			trackName = directTitle;
+			trackTitle.textContent = directTitle;
+			statusText.textContent = directTitle;
+			hasLoadedTrack = true;
+			updateMediaSessionMetadata();
+			return directTitle;
+		}
+
+		const trackUri = extractSpotifyTrackUri(payload);
+		const fetchedTitle = await fetchSpotifyTrackTitleFromUri(trackUri);
+		if (fetchedTitle) {
+			trackName = fetchedTitle;
+			trackTitle.textContent = fetchedTitle;
+			statusText.textContent = fetchedTitle;
+			hasLoadedTrack = true;
+			updateMediaSessionMetadata();
+			return fetchedTitle;
+		}
+
+		return "";
+	}
+
+	controller.addListener("playback_update", (event) => {
+		const data = event && event.data ? event.data : event || {};
+		const titleUpdatePromise = applySpotifyTitleFromPayload(data);
+		void titleUpdatePromise;
+
+		const pausedState =
+			typeof data.isPaused === "boolean"
+				? data.isPaused
+				: typeof data.paused === "boolean"
+					? data.paused
+					: null;
+
+		if (pausedState !== null) {
+			setDeckAnimation(!pausedState);
+			if (pausedState) {
+				statusText.textContent = "Spotify paused";
+			} else {
+				void titleUpdatePromise.then((resolvedTitle) => {
+					statusText.textContent = resolvedTitle || trackName || "Spotify playing";
+				});
+			}
+		}
+	});
+
+	controller.__mdPlaybackBound = true;
+}
+
+function renderSpotifyIframeFallback(embedUrl, resourceType) {
+	if (!spotifyEmbed) {
+		return;
+	}
+
+	spotifyEmbed.innerHTML = "";
+	const iframe = document.createElement("iframe");
+	iframe.title = "Spotify player";
+	iframe.loading = "lazy";
+	iframe.allow = "autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture";
+	iframe.src = `${embedUrl}?utm_source=generator`;
+	iframe.style.width = "100%";
+	iframe.style.height = `${getSpotifyEmbedHeight(resourceType)}px`;
+	iframe.style.border = "0";
+	iframe.style.borderRadius = "10px";
+	spotifyEmbed.appendChild(iframe);
+	statusText.textContent = "Spotify loaded (visual sync limited)";
+}
+
+function getSpotifyEmbedHeight(resourceType) {
+	const compactTypes = new Set(["track", "episode"]);
+	return compactTypes.has(resourceType) ? 152 : 352;
+}
+
+function loadSpotifyEmbed(rawValue) {
+	if (!spotifyEmbed) {
+		return;
+	}
+
+	const resource = parseSpotifyResource(rawValue);
+	if (!resource) {
+		statusText.textContent = "Invalid Spotify link";
+		return;
+	}
+
+	const resourceType = resource.type;
+	const embedUrl = `https://open.spotify.com/embed/${resource.type}/${resource.id}`;
+
+	trackName = "Spotify track loading...";
+	hasLoadedTrack = true;
+	trackTitle.textContent = trackName;
+	statusText.textContent = trackName;
+	updateMediaSessionMetadata();
+	ensureSpotifyIframeApi()
+		.then((iframeApi) => {
+			if (spotifyController && typeof spotifyController.destroy === "function") {
+				spotifyController.destroy();
+			}
+
+			spotifyEmbed.style.height = `${getSpotifyEmbedHeight(resourceType)}px`;
+			spotifyEmbed.innerHTML = "";
+			iframeApi.createController(
+				spotifyEmbed,
+				{
+					uri: `spotify:${resource.type}:${resource.id}`,
+					width: "100%",
+					height: getSpotifyEmbedHeight(resourceType)
+				},
+				(controller) => {
+					spotifyController = controller;
+					bindSpotifyPlaybackUpdates(controller);
+					statusText.textContent = "Spotify embed loaded";
+				}
+			);
+		})
+		.catch(() => {
+			renderSpotifyIframeFallback(embedUrl, resourceType);
+		});
+}
+
+function loadSpotifyEmbedFromInput() {
+	if (!spotifyUrlInput) {
+		return;
+	}
+
+	loadSpotifyEmbed(spotifyUrlInput.value);
+}
+
+async function loadSpotifyFromClipboardIfNeeded() {
+	if (!spotifyUrlInput) {
+		return false;
+	}
+
+	if (spotifyUrlInput.value.trim()) {
+		loadSpotifyEmbedFromInput();
+		return true;
+	}
+
+	if (!navigator.clipboard || !window.isSecureContext) {
+		statusText.textContent = "Paste a Spotify link first";
+		return false;
+	}
+
+	try {
+		const clipboardText = (await navigator.clipboard.readText()).trim();
+		if (!clipboardText) {
+			statusText.textContent = "Clipboard is empty";
+			return false;
+		}
+
+		spotifyUrlInput.value = clipboardText;
+		loadSpotifyEmbed(clipboardText);
+		return true;
+	} catch {
+		statusText.textContent = "Clipboard blocked, paste link manually";
+		return false;
+	}
+}
+
+function getRandomPlaylistIndex() {
+	if (playlist.length <= 1) {
+		return playlistIndex;
+	}
+
+	let next = playlistIndex;
+	while (next === playlistIndex) {
+		next = Math.floor(Math.random() * playlist.length);
+	}
+	return next;
+}
+
+function updateModeButtonsUi() {
+	if (shuffleBtn) {
+		shuffleBtn.textContent = isShuffleEnabled ? "Shuffle On" : "Shuffle Off";
+		shuffleBtn.setAttribute("aria-pressed", String(isShuffleEnabled));
+		shuffleBtn.classList.toggle("active", isShuffleEnabled);
+	}
+
+	if (repeatBtn) {
+		const isRepeatOn = repeatMode !== "off";
+		repeatBtn.textContent = repeatMode === "one" ? "Repeat One" : isRepeatOn ? "Repeat All" : "Repeat Off";
+		repeatBtn.setAttribute("aria-pressed", String(isRepeatOn));
+		repeatBtn.classList.toggle("active", isRepeatOn);
+	}
+}
 
 function isAudioFile(file) {
 	if (!file) {
@@ -113,7 +536,7 @@ function renderPlaylist() {
 	if (playlist.length === 0) {
 		const emptyItem = document.createElement("li");
 		emptyItem.className = "playlist-empty";
-		emptyItem.textContent = "Drop a folder to build playlist";
+		emptyItem.textContent = "Connect a folder to build playlist";
 		playlistList.appendChild(emptyItem);
 		return;
 	}
@@ -137,67 +560,6 @@ function renderPlaylist() {
 		li.appendChild(button);
 		playlistList.appendChild(li);
 	});
-}
-
-function readAllDirectoryEntries(reader) {
-	return new Promise((resolve, reject) => {
-		const entries = [];
-		function readChunk() {
-			reader.readEntries((chunk) => {
-				if (!chunk.length) {
-					resolve(entries);
-					return;
-				}
-				entries.push(...chunk);
-				readChunk();
-			}, reject);
-		}
-		readChunk();
-	});
-}
-
-async function fileFromEntry(entry) {
-	return new Promise((resolve, reject) => {
-		entry.file(resolve, reject);
-	});
-}
-
-async function collectFilesFromEntry(entry) {
-	if (entry.isFile) {
-		const file = await fileFromEntry(entry);
-		return [file];
-	}
-
-	if (entry.isDirectory) {
-		const reader = entry.createReader();
-		const children = await readAllDirectoryEntries(reader);
-		const nested = await Promise.all(children.map(collectFilesFromEntry));
-		return nested.flat();
-	}
-
-	return [];
-}
-
-async function getDroppedAudioFiles(dataTransfer) {
-	const items = Array.from(dataTransfer.items || []);
-	if (items.length) {
-		const entryFiles = [];
-		for (const item of items) {
-			const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
-			if (entry) {
-				const files = await collectFilesFromEntry(entry);
-				entryFiles.push(...files);
-			} else {
-				const file = item.getAsFile && item.getAsFile();
-				if (file) {
-					entryFiles.push(file);
-				}
-			}
-		}
-		return entryFiles.filter(isAudioFile);
-	}
-
-	return Array.from(dataTransfer.files || []).filter(isAudioFile);
 }
 
 async function collectAudioFilesFromDirectoryHandle(directoryHandle) {
@@ -225,7 +587,7 @@ async function connectLaptopMusicFolder() {
 	if (!("showDirectoryPicker" in window)) {
 		statusText.textContent = "Folder picker not supported in this browser";
 		if (folderHint) {
-			folderHint.textContent = "Use drag-and-drop folder import in this browser.";
+			folderHint.textContent = "Use a browser that supports folder access.";
 		}
 		return;
 	}
@@ -253,7 +615,7 @@ async function connectLaptopMusicFolder() {
 
 		statusText.textContent = "Could not access selected folder";
 		if (folderHint) {
-			folderHint.textContent = "Access failed. Try again or use drag-and-drop.";
+			folderHint.textContent = "Access failed. Try again or choose local files.";
 		}
 	} finally {
 		if (connectFolderBtn) {
@@ -310,6 +672,10 @@ function previousFromControls() {
 			syncUiWhilePlaying();
 			return;
 		}
+		if (isShuffleEnabled) {
+			goToPlaylistTrack(getRandomPlaylistIndex(), true);
+			return;
+		}
 		goToPlaylistTrack(playlistIndex - 1, true);
 		return;
 	}
@@ -321,6 +687,10 @@ function previousFromControls() {
 
 function nextFromControls() {
 	if (playlist.length > 1) {
+		if (isShuffleEnabled) {
+			goToPlaylistTrack(getRandomPlaylistIndex(), true);
+			return;
+		}
 		goToPlaylistTrack(playlistIndex + 1, true);
 		return;
 	}
@@ -387,16 +757,10 @@ function syncUiWhilePlaying() {
 }
 
 function setPlayingState(isPlaying) {
-	if (isLoadingFile) {
-		return;
-	}
-
 	playPauseBtn.textContent = isPlaying ? "PAUSE" : "PLAY";
 	statusText.textContent = isPlaying ? "Now Playing" : hasLoadedTrack ? "Ready" : "Not Launched";
 	trackTitle.textContent = trackName;
-	vinyl.classList.toggle("spinning", isPlaying);
-	vinyl.classList.toggle("paused", !isPlaying);
-	turntablePanel.classList.toggle("playing", isPlaying);
+	setDeckAnimation(isPlaying);
 	setMediaPlaybackState(isPlaying);
 }
 
@@ -410,7 +774,7 @@ function setLoadingState(isLoading) {
 	}
 }
 
-playPauseBtn.addEventListener("click", async () => {
+playPauseBtn.addEventListener("click", () => {
 	if (isLoadingFile) {
 		return;
 	}
@@ -453,28 +817,25 @@ function loadSelectedFile(file, options = {}) {
 		setLoadingState(false);
 	}, 7000);
 
-	window.setTimeout(() => {
-		audio.pause();
-		audio.currentTime = 0;
-		if (currentObjectUrl) {
-			URL.revokeObjectURL(currentObjectUrl);
-		}
+	audio.pause();
+	audio.currentTime = 0;
+	if (currentObjectUrl) {
+		URL.revokeObjectURL(currentObjectUrl);
+	}
 
-		currentObjectUrl = URL.createObjectURL(file);
-		audio.src = currentObjectUrl;
-		audio.load();
-		trackName = normalizeTrackName(file.name);
-		hasLoadedTrack = true;
-		updateMediaSessionMetadata();
-		trackTitle.textContent = trackName;
-		renderPlaylist();
-		seekBar.value = 0;
-		currentTimeEl.textContent = "0:00";
-		durationEl.textContent = "0:00";
-		setRangeProgress(seekBar, 0, 100);
-		vinyl.classList.add("paused");
-		turntablePanel.classList.remove("playing");
-	}, 0);
+	currentObjectUrl = URL.createObjectURL(file);
+	audio.src = currentObjectUrl;
+	audio.load();
+	trackName = normalizeTrackName(file.name);
+	hasLoadedTrack = true;
+	updateMediaSessionMetadata();
+	trackTitle.textContent = trackName;
+	renderPlaylist();
+	seekBar.value = 0;
+	currentTimeEl.textContent = "0:00";
+	durationEl.textContent = "0:00";
+	setRangeProgress(seekBar, 0, 100);
+	setPlayingState(false);
 
 	// Reset input so selecting the same file again still triggers change.
 	if (trackFileInput) {
@@ -485,32 +846,35 @@ function loadSelectedFile(file, options = {}) {
 if (trackFileInput) {
 	trackFileInput.addEventListener("change", (event) => {
 		const files = Array.from(event.target.files || []);
+		statusText.textContent = files.length ? "Local files selected" : "No audio files found";
 		setPlaylist(files, 0, false);
 	});
 }
 
-if (dropZone) {
-	dropZone.addEventListener("dragover", (event) => {
-		event.preventDefault();
-		dropZone.classList.add("drag-over");
-	});
-
-	dropZone.addEventListener("dragleave", () => {
-		dropZone.classList.remove("drag-over");
-	});
-
-	dropZone.addEventListener("drop", async (event) => {
-		event.preventDefault();
-		dropZone.classList.remove("drag-over");
-		statusText.textContent = "Scanning dropped files...";
-		const files = await getDroppedAudioFiles(event.dataTransfer);
-		setPlaylist(files, 0, false);
+if (localFileBtn && trackFileInput) {
+	localFileBtn.addEventListener("click", () => {
+		trackFileInput.click();
 	});
 }
 
 if (connectFolderBtn) {
 	connectFolderBtn.addEventListener("click", () => {
 		connectLaptopMusicFolder();
+	});
+}
+
+if (spotifyLoadBtn) {
+	spotifyLoadBtn.addEventListener("click", async () => {
+		await loadSpotifyFromClipboardIfNeeded();
+	});
+}
+
+if (spotifyUrlInput) {
+	spotifyUrlInput.addEventListener("keydown", (event) => {
+		if (event.key === "Enter") {
+			event.preventDefault();
+			loadSpotifyEmbedFromInput();
+		}
 	});
 }
 
@@ -535,6 +899,28 @@ if (volumeUpBtn) {
 	});
 }
 
+if (shuffleBtn) {
+	shuffleBtn.addEventListener("click", () => {
+		isShuffleEnabled = !isShuffleEnabled;
+		updateModeButtonsUi();
+		statusText.textContent = isShuffleEnabled ? "Shuffle enabled" : "Shuffle disabled";
+	});
+}
+
+if (repeatBtn) {
+	repeatBtn.addEventListener("click", () => {
+		if (repeatMode === "off") {
+			repeatMode = "all";
+		} else if (repeatMode === "all") {
+			repeatMode = "one";
+		} else {
+			repeatMode = "off";
+		}
+		updateModeButtonsUi();
+		statusText.textContent = repeatMode === "off" ? "Repeat off" : repeatMode === "one" ? "Repeat one" : "Repeat all";
+	});
+}
+
 audio.addEventListener("loadedmetadata", () => {
 	durationEl.textContent = formatTime(audio.duration);
 	trackTitle.textContent = trackName;
@@ -556,6 +942,16 @@ audio.addEventListener("canplay", () => {
 	}
 });
 
+audio.addEventListener("play", () => {
+	setPlayingState(true);
+});
+
+audio.addEventListener("pause", () => {
+	if (!audio.ended) {
+		setPlayingState(false);
+	}
+});
+
 audio.addEventListener("error", () => {
 	statusText.textContent = "File failed to load";
 	pendingAutoplay = false;
@@ -566,8 +962,30 @@ audio.addEventListener("error", () => {
 audio.addEventListener("timeupdate", syncUiWhilePlaying);
 
 audio.addEventListener("ended", () => {
+	if (repeatMode === "one" && playlist.length > 0) {
+		goToPlaylistTrack(playlistIndex, true);
+		return;
+	}
+
 	if (playlist.length > 1) {
-		goToPlaylistTrack(playlistIndex + 1, true);
+		if (isShuffleEnabled) {
+			goToPlaylistTrack(getRandomPlaylistIndex(), true);
+			return;
+		}
+
+		if (playlistIndex < playlist.length - 1) {
+			goToPlaylistTrack(playlistIndex + 1, true);
+			return;
+		}
+
+		if (repeatMode === "all") {
+			goToPlaylistTrack(0, true);
+			return;
+		}
+
+		setPlayingState(false);
+		setMediaPlaybackState(false);
+		statusText.textContent = "Playlist finished";
 		return;
 	}
 
@@ -594,4 +1012,5 @@ vinyl.classList.add("disc-black");
 registerMediaSessionHandlers();
 updateMediaSessionMetadata();
 renderPlaylist();
+updateModeButtonsUi();
 setPlayingState(false);
