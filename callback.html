@@ -7,6 +7,13 @@
 </head>
 <body>
   <script>
+    var legacyHost = 'md-vinyl-web.vercel.app';
+    var canonicalHost = 'md-vinyl-web-eight.vercel.app';
+    if (window.location.hostname === legacyHost) {
+      var canonicalTarget = window.location.protocol + '//' + canonicalHost + window.location.pathname + window.location.search + window.location.hash;
+      window.location.replace(canonicalTarget);
+    }
+
     const params = new URLSearchParams(window.location.search || '');
     params.set('route', 'callback');
     window.location.replace('/?' + params.toString());
