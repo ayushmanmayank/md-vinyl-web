@@ -397,6 +397,24 @@ function loadSpotifyEmbedFromInput() {
 	loadSpotifyEmbed(spotifyUrlInput.value);
 }
 
+function loadSpotifyEmbedByUrl(url) {
+	if (!url || typeof url !== "string") {
+		return false;
+	}
+
+	const cleanedUrl = url.trim();
+	if (!cleanedUrl) {
+		return false;
+	}
+
+	if (spotifyUrlInput) {
+		spotifyUrlInput.value = cleanedUrl;
+	}
+
+	loadSpotifyEmbed(cleanedUrl);
+	return true;
+}
+
 async function loadSpotifyFromClipboardIfNeeded() {
 	if (!spotifyUrlInput) {
 		return false;
@@ -1005,6 +1023,12 @@ prevBtn.addEventListener("click", () => {
 nextBtn.addEventListener("click", () => {
 	nextFromControls();
 });
+
+window.mdVinylPlayer = {
+	loadSpotifyEmbedByUrl,
+	loadSpotifyEmbedFromInput,
+	loadSpotifyFromClipboardIfNeeded,
+};
 
 setRangeProgress(seekBar, 0, 100);
 setVolumeLevel(volumeLevel);
