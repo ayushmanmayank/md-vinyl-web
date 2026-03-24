@@ -137,6 +137,7 @@
                 const routeParam = new URLSearchParams(window.location.search).get('route');
                 if (path === '/callback' || path === '/callback/' || routeParam === 'callback') return 'callback';
                 if (path === '/spotify-dashboard' || path === '/spotify-dashboard/' || routeParam === 'spotify-dashboard') return 'dashboard';
+                if (path === '/player' || path === '/player/' || routeParam === 'player') return 'player';
                 return 'home';
             }
 
@@ -150,8 +151,8 @@
             }, []);
 
             // Handle navigation
-            const navigate = (path) => {
-                window.history.pushState(null, '', path);
+            const navigate = (path, state = null) => {
+                window.history.pushState(state, '', path);
                 setCurrentPage(getInitialPage());
             };
 
@@ -159,7 +160,8 @@
                 <>
                     {currentPage === 'home' && <HomePage onNavigate={navigate} />}
                     {currentPage === 'callback' && <CallbackPageComponent />}
-                    {currentPage === 'dashboard' && <DashboardPageComponent />}
+                    {currentPage === 'dashboard' && <DashboardPageComponent onNavigate={navigate} />}
+                    {currentPage === 'player' && <PlayerPageComponent onNavigate={navigate} />}
                 </>
             );
         }
@@ -488,7 +490,7 @@
         }
 
         // Dashboard Page Component
-        function DashboardPageComponent() {
+        function DashboardPageComponent({ onNavigate }) {
             const [user, setUser] = React.useState(null);
             const [playlists, setPlaylists] = React.useState([]);
             const [topTracks, setTopTracks] = React.useState([]);
@@ -565,6 +567,35 @@
                 window.location.href = '/';
             };
 
+            const handleTrackSelect = (track) => {
+                if (!track) {
+                    return;
+                }
+
+                const spotifyUrl = track.external_urls?.spotify || (track.id ? `https://open.spotify.com/track/${track.id}` : '');
+                if (!spotifyUrl) {
+                    return;
+                }
+
+                localStorage.setItem('selectedTrack', JSON.stringify(track));
+                localStorage.setItem('selectedSpotifyUrl', spotifyUrl);
+                onNavigate('/player', { track, spotifyUrl });
+            };
+
+            const handlePlaylistSelect = (playlist) => {
+                if (!playlist) {
+                    return;
+                }
+
+                const spotifyUrl = playlist.external_urls?.spotify || (playlist.id ? `https://open.spotify.com/playlist/${playlist.id}` : '');
+                if (!spotifyUrl) {
+                    return;
+                }
+
+                localStorage.setItem('selectedSpotifyUrl', spotifyUrl);
+                onNavigate('/player', { playlist, spotifyUrl });
+            };
+
             if (loading) {
                 return <div style={styles.container}><div style={styles.spinner}></div><p>Loading your Spotify data...</p></div>;
             }
@@ -636,18 +667,18 @@
                                 <h2>Your Playlists ({playlists.length})</h2>
                                 <div style={styles.grid}>
                                     {playlists.map(playlist => (
-                                        <a
+                                        <button
                                             key={playlist.id}
-                                            href={playlist.external_urls?.spotify}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                            type="button"
+                                            onClick={() => handlePlaylistSelect(playlist)}
                                             style={styles.playlistCard}
                                         >
                                             {playlist.images?.[0]?.url && (
                                                 <img src={playlist.images[0].url} alt={playlist.name} style={styles.playlistImage} />
                                             )}
                                             <h3>{playlist.name}</h3>
-                                        </a>
+                                            <p style={styles.inlineHint}>Tap to open this playlist in the in-app player.</p>
+                                        </button>
                                     ))}
                                 </div>
                             </div>
@@ -658,11 +689,10 @@
                                 <h2>Your Top Tracks</h2>
                                 <div style={styles.trackList}>
                                     {topTracks.map((track, index) => (
-                                        <a
+                                        <button
                                             key={track.id}
-                                            href={track.external_urls?.spotify}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                            type="button"
+                                            onClick={() => handleTrackSelect(track)}
                                             style={styles.trackItem}
                                         >
                                             <span style={styles.trackIndex}>{index + 1}</span>
@@ -670,7 +700,7 @@
                                                 <h4>{track.name}</h4>
                                                 <p>{track.artists?.map(a => a.name).join(', ')}</p>
                                             </div>
-                                        </a>
+                                        </button>
                                     ))}
                                 </div>
                             </div>
@@ -681,22 +711,80 @@
                                 <h2>Recommended For You</h2>
                                 <div style={styles.grid}>
                                     {recommendations.map(track => (
-                                        <a
+                                        <button
                                             key={track.id}
-                                            href={track.external_urls?.spotify}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                            type="button"
+                                            onClick={() => handleTrackSelect(track)}
                                             style={styles.trackCard}
                                         >
                                             {track.album?.images?.[0]?.url && (
                                                 <img src={track.album.images[0].url} alt={track.name} style={styles.trackCardImage} />
                                             )}
                                             <h4>{track.name}</h4>
-                                        </a>
+                                        </button>
                                     ))}
                                 </div>
                             </div>
                         )}
+                    </div>
+                </div>
+            );
+        }
+
+        function PlayerPageComponent({ onNavigate }) {
+            const [status, setStatus] = React.useState('Preparing player...');
+
+            React.useEffect(() => {
+                document.getElementById('home-page').style.display = 'block';
+
+                const spotifyUrlFromState = window.history.state?.spotifyUrl || '';
+                const spotifyUrlFromStorage = localStorage.getItem('selectedSpotifyUrl') || '';
+                const spotifyUrl = spotifyUrlFromState || spotifyUrlFromStorage;
+
+                if (!spotifyUrl) {
+                    onNavigate('/');
+                    return () => {
+                        document.getElementById('home-page').style.display = 'none';
+                    };
+                }
+
+                const loadIntoOriginalPlayer = () => {
+                    if (window.mdVinylPlayer?.loadSpotifyEmbedByUrl) {
+                        const loaded = window.mdVinylPlayer.loadSpotifyEmbedByUrl(spotifyUrl);
+                        if (loaded) {
+                            setStatus('Loaded in player.');
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+
+                if (!loadIntoOriginalPlayer()) {
+                    const retryId = window.setTimeout(() => {
+                        if (!loadIntoOriginalPlayer()) {
+                            setStatus('Could not load Spotify link. Go back and try again.');
+                        }
+                    }, 250);
+
+                    return () => {
+                        window.clearTimeout(retryId);
+                        document.getElementById('home-page').style.display = 'none';
+                    };
+                }
+
+                return () => {
+                    document.getElementById('home-page').style.display = 'none';
+                };
+            }, [onNavigate]);
+
+            return (
+                <div style={styles.playerRouteOverlay}>
+                    <div style={styles.playerRouteCard}>
+                        <p style={{ margin: '0 0 10px' }}>Player route active</p>
+                        <p style={{ margin: 0, opacity: 0.85 }}>{status}</p>
+                        <button type="button" style={styles.button} onClick={() => onNavigate('/spotify-dashboard')}>
+                            Back to Dashboard
+                        </button>
                     </div>
                 </div>
             );
@@ -861,7 +949,14 @@
                 borderRadius: '10px',
                 textDecoration: 'none',
                 color: 'inherit',
+                border: '1px solid #333333',
+                textAlign: 'left',
+                cursor: 'pointer',
                 transition: 'background-color 0.3s',
+            },
+            inlineHint: {
+                fontSize: '12px',
+                color: '#b3b3b3',
             },
             playlistImage: {
                 width: '100%',
@@ -876,6 +971,9 @@
                 borderRadius: '10px',
                 textDecoration: 'none',
                 color: 'inherit',
+                border: '1px solid #333333',
+                cursor: 'pointer',
+                textAlign: 'left',
                 transition: 'background-color 0.3s',
             },
             trackCardImage: {
@@ -895,6 +993,9 @@
                 padding: '12px 0',
                 borderBottom: '1px solid #282828',
                 textDecoration: 'none',
+                backgroundColor: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
                 color: 'inherit',
                 transition: 'background-color 0.3s',
             },
@@ -908,6 +1009,20 @@
                 flex: 1,
                 minWidth: 0,
             },
+            playerRouteOverlay: {
+                position: 'fixed',
+                top: '12px',
+                left: '12px',
+                zIndex: 1100,
+            },
+            playerRouteCard: {
+                backgroundColor: 'rgba(18, 18, 18, 0.85)',
+                color: '#ffffff',
+                border: '1px solid #2b2b2b',
+                borderRadius: '10px',
+                padding: '12px',
+                width: 'min(92vw, 280px)',
+            },
         };
 
         // Add CSS animation
@@ -916,6 +1031,7 @@
             @keyframes spin {
                 to { transform: rotate(360deg); }
             }
+
         `;
         document.head.appendChild(styleSheet);
 
