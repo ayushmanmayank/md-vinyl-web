@@ -3,15 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MD Vinyl for Windows</title>
+    <title>MD Vinyl for Windows - Spotify Integration</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2316171b'/%3E%3Ccircle cx='32' cy='32' r='10' fill='%23e9e5dd'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Cinzel:wght@500;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./style.css">
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body>
-    <main class="desktop-shell">
+    <!-- Router Container -->
+    <div id="app"></div>
+
+    <!-- Original App Content (Home Page) -->
+    <main class="desktop-shell" id="home-page" style="display: none;">
         <section class="app-window" aria-label="MD Vinyl Player">
             <div class="window-body">
                 <div class="turntable-panel">
@@ -96,6 +103,827 @@
     </main>
 
     <audio id="player" preload="metadata"></audio>
+
+    <script type="module">
+        import { loginWithSpotify, exchangeCodeForToken, verifyOAuthState, logout } from './src/spotify/auth.js';
+        import { getCurrentUser, getUserPlaylists, getUserTopTracks, getRecommendations } from './src/spotify/api.js';
+
+        window.spotifyAuthBridge = {
+            loginWithSpotify,
+            exchangeCodeForToken,
+            verifyOAuthState,
+            logout,
+        };
+
+        window.spotifyApiBridge = {
+            getCurrentUser,
+            getUserPlaylists,
+            getUserTopTracks,
+            getRecommendations,
+        };
+    </script>
+    
+    <!-- Router Script -->
+    <script type="text/babel">
+        // Simple client-side router
+        const { useState, useEffect } = React;
+
+        // Import components
+        function Router() {
+            const [currentPage, setCurrentPage] = useState(getInitialPage());
+
+            function getInitialPage() {
+                const path = window.location.pathname;
+                const routeParam = new URLSearchParams(window.location.search).get('route');
+                if (path === '/callback' || path === '/callback/' || routeParam === 'callback') return 'callback';
+                if (path === '/spotify-dashboard' || path === '/spotify-dashboard/' || routeParam === 'spotify-dashboard') return 'dashboard';
+                return 'home';
+            }
+
+            useEffect(() => {
+                const handleLocationChange = () => {
+                    setCurrentPage(getInitialPage());
+                };
+
+                window.addEventListener('popstate', handleLocationChange);
+                return () => window.removeEventListener('popstate', handleLocationChange);
+            }, []);
+
+            // Handle navigation
+            const navigate = (path) => {
+                window.history.pushState(null, '', path);
+                setCurrentPage(getInitialPage());
+            };
+
+            return (
+                <>
+                    {currentPage === 'home' && <HomePage onNavigate={navigate} />}
+                    {currentPage === 'callback' && <CallbackPageComponent />}
+                    {currentPage === 'dashboard' && <DashboardPageComponent />}
+                </>
+            );
+        }
+
+        // Home Page Component
+        function HomePage({ onNavigate }) {
+            useEffect(() => {
+                // Show the original vinyl player HTML
+                document.getElementById('home-page').style.display = 'block';
+                return () => {
+                    document.getElementById('home-page').style.display = 'none';
+                };
+            }, []);
+
+            return (
+                <div>
+                    <div style={{
+                        position: 'absolute',
+                        top: '10px',
+                        right: '10px',
+                        zIndex: 1000,
+                    }}>
+                        <button
+                            onClick={() => {
+                                if (window.spotifyAuthBridge?.loginWithSpotify) {
+                                    window.spotifyAuthBridge.loginWithSpotify();
+                                } else {
+                                    console.error('Spotify auth bridge not loaded yet.');
+                                }
+                            }}
+                            style={{
+                                backgroundColor: '#1db954',
+                                color: 'white',
+                                border: 'none',
+                                padding: '10px 20px',
+                                borderRadius: '24px',
+                                cursor: 'pointer',
+                                fontWeight: 'bold',
+                            }}
+                        >
+                            🎵 Connect Spotify
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // Callback Page Component
+        function CallbackPageComponent() {
+            const [status, setStatus] = React.useState('loading');
+            const [error, setError] = React.useState(null);
+            const [debugInfo, setDebugInfo] = React.useState('');
+
+            React.useEffect(() => {
+                handleCallback();
+            }, []);
+
+            async function handleCallback() {
+                try {
+                    // =================================================================
+                    // STEP 1: Extract Authorization Code
+                    // =================================================================
+                    console.log('🟦 STEP 1: Extracting Authorization Code');
+                    
+                    const fullUrl = window.location.href;
+                    console.log('FULL URL:', fullUrl);
+                    setDebugInfo(prev => prev + `Full Callback URL: ${fullUrl}\n`);
+
+                    const params = new URLSearchParams(window.location.search);
+                    const code = params.get('code');
+                    const state = params.get('state');
+                    const errorParam = params.get('error');
+                    const errorDescription = params.get('error_description');
+
+                    console.log('Extracted Params:', {
+                        'Code Present?': !!code,
+                        'Code (first 20 chars)': code ? code.substring(0, 20) + '...' : 'NULL ❌',
+                        'State (first 8 chars)': state ? state.substring(0, 8) + '...' : 'NULL ❌',
+                        'Error Param': errorParam || 'None',
+                        'Error Description': errorDescription || 'None'
+                    });
+
+                    setDebugInfo(prev => prev + `\n✓ Authorization Code: ${code ? code.substring(0, 20) + '...' : 'NULL ❌'}`);
+
+                    // Check for Spotify errors first
+                    if (errorParam) {
+                        let errorMsg = `Spotify Error: ${errorParam}`;
+                        if (errorDescription) {
+                            errorMsg += ` - ${errorDescription}`;
+                        }
+                        
+                        // Add helpful diagnosis for common errors
+                        let diagnosis = '';
+                        if (errorParam === 'invalid_request') {
+                            diagnosis = '\n\n📋 This usually means:\n' +
+                              '• Redirect URI does not match Spotify Dashboard settings\n' +
+                              '• Check if you registered: http://127.0.0.1:5500/callback/\n' +
+                              '• Make sure there are no duplicate entries\n' +
+                              '• Remove any versions without the trailing slash\n\n' +
+                              '🔗 Open Spotify Developer Dashboard and verify the Redirect URI';
+                        } else if (errorParam === 'invalid_scope') {
+                            diagnosis = '\n\n📋 One or more requested scopes are not enabled.\n\n' +
+                              '✅ Currently enabled scopes:\n' +
+                              '  • user-read-private (Read user data)\n' +
+                              '  • user-read-email (Read email)\n\n' +
+                              '❌ Optional scopes (disabled by default):\n' +
+                              '  • playlist-read-private\n' +
+                              '  • playlist-read-public\n' +
+                              '  • user-top-read\n\n' +
+                              '📝 To enable more scopes:\n' +
+                              '1. Go to Spotify Developer Dashboard\n' +
+                              '2. Open your app settings\n' +
+                              '3. Scroll to "Scopes" section\n' +
+                              '4. Check desired permissions\n' +
+                              '5. Then restart the app and try again\n';
+
+                        } else if (errorParam === 'invalid_client') {
+                            diagnosis = '\n\n📋 Client ID is not valid.\n' +
+                              'Check that the Client ID is correct: 060af9faf02a4879bf7081fd088e06cf\n';
+                        }
+                        
+                        console.error('❌ Spotify Authorization Error:');
+                        console.error('Error Type:', errorParam);
+                        console.error('Description:', errorDescription || 'None provided');
+                        console.error('Expected Redirect URI: http://127.0.0.1:5500/callback/');
+                        
+                        setError(errorMsg + diagnosis);
+                        setDebugInfo(prev => prev + `\n❌ Spotify Error: ${errorParam}\n${diagnosis}`);
+                        setStatus('error');
+                        return;
+                    }
+
+                    // Check if code is missing
+                    if (!code) {
+                        const msg = 'Authorization code missing from callback URL. Please verify the Spotify redirect URI is correct.';
+                        console.error('❌ ' + msg);
+                        setError(msg);
+                        setDebugInfo(prev => prev + `\n❌ ${msg}`);
+                        setStatus('error');
+                        return;
+                    }
+
+                    console.log('✅ Code extracted successfully:', code.substring(0, 20) + '...');
+                    setStatus('verifying');
+
+                    // =================================================================
+                    // STEP 2: Verify OAuth State (CSRF Protection)
+                    // =================================================================
+                    console.log('\n🟦 STEP 2: Verifying OAuth State');
+                    
+                    const { verifyOAuthState } = window.spotifyAuthBridge || {};
+                    if (!verifyOAuthState) {
+                        throw new Error('verifyOAuthState function not available in auth bridge');
+                    }
+
+                    try {
+                        verifyOAuthState(state);
+                        console.log('✅ OAuth state verified successfully');
+                        setDebugInfo(prev => prev + `\n✓ State verified properly`);
+                    } catch (stateErr) {
+                        console.error('❌ State verification failed:', stateErr.message);
+                        setError(`State verification failed: ${stateErr.message}`);
+                        setDebugInfo(prev => prev + `\n❌ State verification failed: ${stateErr.message}`);
+                        setStatus('error');
+                        return;
+                    }
+
+                    // =================================================================
+                    // STEP 3: Exchange Code for Access Token
+                    // =================================================================
+                    console.log('\n🟦 STEP 3: Exchanging Authorization Code for Access Token');
+                    console.log('Request to: https://accounts.spotify.com/api/token');
+                    console.log('Grant Type: authorization_code');
+                    console.log('Redirect URI: ' + (window.location.origin + '/callback/'));
+                    
+                    const { exchangeCodeForToken } = window.spotifyAuthBridge || {};
+                    if (!exchangeCodeForToken) {
+                        throw new Error('exchangeCodeForToken function not available in auth bridge');
+                    }
+
+                    setStatus('exchanging');
+                    setDebugInfo(prev => prev + `\n\nExchanging code for token...`);
+
+                    const tokenResponse = await exchangeCodeForToken(code);
+
+                    console.log('✅ Token Exchange Response:', {
+                        'Access Token (first 20 chars)': tokenResponse.access_token ? 
+                            tokenResponse.access_token.substring(0, 20) + '...' : 'NULL ❌',
+                        'Token Type': tokenResponse.token_type || 'N/A',
+                        'Expires In': tokenResponse.expires_in + ' seconds',
+                        'Scope': tokenResponse.scope || 'N/A'
+                    });
+
+                    setDebugInfo(prev => prev + `\n✓ Token received: ${tokenResponse.access_token ? 
+                        tokenResponse.access_token.substring(0, 20) + '...' : 'NOT FOUND'}`);
+
+                    // =================================================================
+                    // STEP 4: Verify and Store Token
+                    // =================================================================
+                    console.log('\n🟦 STEP 4: Storing Access Token');
+
+                    if (!tokenResponse.access_token) {
+                        throw new Error('Access token not received from Spotify. Response: ' + JSON.stringify(tokenResponse));
+                    }
+
+                    // Verify token is stored correctly
+                    sessionStorage.setItem('spotify_access_token', tokenResponse.access_token);
+                    const storedToken = sessionStorage.getItem('spotify_access_token');
+                    
+                    console.log('Token stored in sessionStorage:', !!storedToken);
+                    console.log('Token validation:', {
+                        'Token Stored?': !!storedToken,
+                        'Token Matches?': storedToken === tokenResponse.access_token,
+                        'Token Length': storedToken ? storedToken.length : 0
+                    });
+
+                    setDebugInfo(prev => prev + `\n✓ Token stored in sessionStorage (${storedToken.length} chars)`);
+
+                    // =================================================================
+                    // STEP 5: Verify API Can Use Token
+                    // =================================================================
+                    console.log('\n🟦 STEP 5: Verifying Token Works');
+                    console.log('Complete flow ready. Proceeding to dashboard...');
+
+                    setStatus('success');
+                    setDebugInfo(prev => prev + `\n\n✅ ALL STEPS COMPLETE - Authorization successful!\nRedirecting to dashboard...`);
+
+                    // Redirect after a short delay for UI feedback
+                    setTimeout(() => {
+                        console.log('🔄 Redirecting to /spotify-dashboard/');
+                        window.location.href = '/spotify-dashboard/';
+                    }, 1500);
+
+                } catch (err) {
+                    console.error('\n❌ Callback handler error:', err);
+                    console.error('Error message:', err.message);
+                    console.error('Full error:', err);
+                    
+                    setError(err.message || 'Failed to complete authorization');
+                    setDebugInfo(prev => prev + `\n\n❌ ERROR: ${err.message}`);
+                    setStatus('error');
+                }
+            }
+
+            return (
+                <div style={styles.container}>
+                    <div style={styles.card}>
+                        {status === 'loading' && (
+                            <>
+                                <div style={styles.spinner}></div>
+                                <h2>🔄 Processing Callback...</h2>
+                                <p>Extracting authorization code from URL</p>
+                            </>
+                        )}
+                        {status === 'verifying' && (
+                            <>
+                                <div style={styles.spinner}></div>
+                                <h2>✓ Code Extracted</h2>
+                                <p>Verifying OAuth state...</p>
+                            </>
+                        )}
+                        {status === 'exchanging' && (
+                            <>
+                                <div style={styles.spinner}></div>
+                                <h2>💱 Exchanging Code for Token</h2>
+                                <p>POST to: https://accounts.spotify.com/api/token</p>
+                            </>
+                        )}
+                        {status === 'success' && (
+                            <>
+                                <div style={styles.successIcon}>✅</div>
+                                <h2>Authorization Successful!</h2>
+                                <p>Token received and stored. Redirecting to dashboard...</p>
+                            </>
+                        )}
+                        {status === 'error' && (
+                            <>
+                                <div style={styles.errorIcon}>❌</div>
+                                <h2>Authorization Failed</h2>
+                                <p style={styles.errorMessage}>{error}</p>
+                                <pre style={{
+                                    backgroundColor: '#0a0a0a',
+                                    color: '#ff6b6b',
+                                    padding: '12px',
+                                    borderRadius: '6px',
+                                    overflow: 'auto',
+                                    fontSize: '12px',
+                                    maxHeight: '300px',
+                                    textAlign: 'left',
+                                    margin: '12px 0'
+                                }}>
+                                    {debugInfo}
+                                </pre>
+                                <button
+                                    style={styles.button}
+                                    onClick={() => {
+                                        if (window.spotifyAuthBridge?.logout) {
+                                            window.spotifyAuthBridge.logout();
+                                        }
+                                        window.location.href = '/';
+                                    }}
+                                >
+                                    Try Again
+                                </button>
+                            </>
+                        )}
+                        {debugInfo && status !== 'error' && (
+                            <pre style={{
+                                backgroundColor: '#1a1a1a',
+                                color: '#1db954',
+                                padding: '12px',
+                                borderRadius: '6px',
+                                overflow: 'auto',
+                                fontSize: '11px',
+                                maxHeight: '250px',
+                                textAlign: 'left',
+                                margin: '12px 0',
+                                fontFamily: 'monospace'
+                            }}>
+                                {debugInfo}
+                            </pre>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Dashboard Page Component
+        function DashboardPageComponent() {
+            const [user, setUser] = React.useState(null);
+            const [playlists, setPlaylists] = React.useState([]);
+            const [topTracks, setTopTracks] = React.useState([]);
+            const [recommendations, setRecommendations] = React.useState([]);
+            const [loading, setLoading] = React.useState(true);
+            const [error, setError] = React.useState(null);
+            const [activeTab, setActiveTab] = React.useState('profile');
+
+            React.useEffect(() => {
+                loadData();
+            }, []);
+
+            async function loadData() {
+                try {
+                    setLoading(true);
+                    const { getCurrentUser, getUserPlaylists, getUserTopTracks, getRecommendations } = window.spotifyApiBridge || {};
+                    if (!getCurrentUser || !getUserPlaylists || !getUserTopTracks || !getRecommendations) {
+                        throw new Error('Spotify API bridge not loaded yet.');
+                    }
+
+                    const userProfile = await getCurrentUser();
+                    setUser(userProfile);
+                    console.log('✅ User profile loaded:', userProfile.display_name);
+
+                    const [playlistsResult, topTracksResult] = await Promise.allSettled([
+                        getUserPlaylists({ limit: 20 }),
+                        getUserTopTracks({ limit: 20, time_range: 'medium_term' }),
+                    ]);
+
+                    if (playlistsResult.status === 'fulfilled') {
+                        setPlaylists(playlistsResult.value.items || []);
+                    } else {
+                        console.warn('⚠️ Failed to load playlists:', playlistsResult.reason?.message || playlistsResult.reason);
+                        setPlaylists([]);
+                    }
+
+                    let tracks = [];
+                    if (topTracksResult.status === 'fulfilled') {
+                        tracks = topTracksResult.value.items || [];
+                        setTopTracks(tracks);
+                    } else {
+                        console.warn('⚠️ Failed to load top tracks:', topTracksResult.reason?.message || topTracksResult.reason);
+                        setTopTracks([]);
+                    }
+
+                    if (tracks.length > 0) {
+                        try {
+                            const seedTrackIds = tracks.slice(0, 3).map(t => t.id).join(',');
+                            const recsData = await getRecommendations({
+                                seed_tracks: seedTrackIds,
+                                limit: 20,
+                            });
+                            setRecommendations(recsData.tracks || []);
+                        } catch (recsErr) {
+                            console.warn('⚠️ Failed to load recommendations:', recsErr.message || recsErr);
+                            setRecommendations([]);
+                        }
+                    } else {
+                        setRecommendations([]);
+                    }
+
+                    setLoading(false);
+                } catch (err) {
+                    console.error('❌ Error loading dashboard:', err);
+                    setError(err.message);
+                    setLoading(false);
+                }
+            }
+
+            const handleLogout = async () => {
+                if (window.spotifyAuthBridge?.logout) {
+                    window.spotifyAuthBridge.logout();
+                }
+                window.location.href = '/';
+            };
+
+            if (loading) {
+                return <div style={styles.container}><div style={styles.spinner}></div><p>Loading your Spotify data...</p></div>;
+            }
+
+            if (error) {
+                return (
+                    <div style={styles.container}>
+                        <div style={styles.errorBox}>
+                            <h2>❌ Error Loading Dashboard</h2>
+                            <p>{error}</p>
+                            <button style={styles.button} onClick={() => window.location.reload()}>Try Again</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div style={styles.page}>
+                    <div style={styles.header}>
+                        <div style={styles.userInfo}>
+                            {user?.images?.[0]?.url && (
+                                <img src={user.images[0].url} alt={user.display_name} style={styles.avatar} />
+                            )}
+                            <div>
+                                <h1>{user?.display_name}</h1>
+                                <p>{user?.email}</p>
+                            </div>
+                        </div>
+                        <button style={styles.logoutBtn} onClick={handleLogout}>Logout</button>
+                    </div>
+
+                    <div style={styles.tabs}>
+                        {['profile', 'playlists', 'topTracks', 'recommendations'].map(tab => (
+                            <button
+                                key={tab}
+                                style={{
+                                    ...styles.tabBtn,
+                                    ...(activeTab === tab ? styles.tabBtnActive : {}),
+                                }}
+                                onClick={() => setActiveTab(tab)}
+                            >
+                                {tab === 'profile' && '👤 Profile'}
+                                {tab === 'playlists' && '🎵 Playlists'}
+                                {tab === 'topTracks' && '⭐ Top Tracks'}
+                                {tab === 'recommendations' && '✨ Recommendations'}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div style={styles.content}>
+                        {activeTab === 'profile' && (
+                            <div>
+                                <h2>Your Profile</h2>
+                                <div style={styles.profileGrid}>
+                                    <div style={styles.profileCard}>
+                                        <span style={styles.label}>Followers</span>
+                                        <span style={styles.value}>{user?.followers?.total?.toLocaleString()}</span>
+                                    </div>
+                                    <div style={styles.profileCard}>
+                                        <span style={styles.label}>Account Type</span>
+                                        <span style={styles.value}>{user?.product === 'premium' ? '🎵 Premium' : 'Free'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'playlists' && (
+                            <div>
+                                <h2>Your Playlists ({playlists.length})</h2>
+                                <div style={styles.grid}>
+                                    {playlists.map(playlist => (
+                                        <a
+                                            key={playlist.id}
+                                            href={playlist.external_urls?.spotify}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={styles.playlistCard}
+                                        >
+                                            {playlist.images?.[0]?.url && (
+                                                <img src={playlist.images[0].url} alt={playlist.name} style={styles.playlistImage} />
+                                            )}
+                                            <h3>{playlist.name}</h3>
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'topTracks' && (
+                            <div>
+                                <h2>Your Top Tracks</h2>
+                                <div style={styles.trackList}>
+                                    {topTracks.map((track, index) => (
+                                        <a
+                                            key={track.id}
+                                            href={track.external_urls?.spotify}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={styles.trackItem}
+                                        >
+                                            <span style={styles.trackIndex}>{index + 1}</span>
+                                            <div style={styles.trackInfo}>
+                                                <h4>{track.name}</h4>
+                                                <p>{track.artists?.map(a => a.name).join(', ')}</p>
+                                            </div>
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'recommendations' && (
+                            <div>
+                                <h2>Recommended For You</h2>
+                                <div style={styles.grid}>
+                                    {recommendations.map(track => (
+                                        <a
+                                            key={track.id}
+                                            href={track.external_urls?.spotify}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={styles.trackCard}
+                                        >
+                                            {track.album?.images?.[0]?.url && (
+                                                <img src={track.album.images[0].url} alt={track.name} style={styles.trackCardImage} />
+                                            )}
+                                            <h4>{track.name}</h4>
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const styles = {
+            container: {
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                minHeight: '100vh',
+                backgroundColor: '#121212',
+                color: '#ffffff',
+                flexDirection: 'column',
+            },
+            page: {
+                backgroundColor: '#121212',
+                color: '#ffffff',
+                minHeight: '100vh',
+            },
+            card: {
+                background: '#1db954',
+                padding: '40px',
+                borderRadius: '10px',
+                textAlign: 'center',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+                color: 'white',
+                maxWidth: '400px',
+            },
+            spinner: {
+                width: '50px',
+                height: '50px',
+                border: '4px solid rgba(255, 255, 255, 0.3)',
+                borderTop: '4px solid white',
+                borderRadius: '50%',
+                margin: '0 auto 20px',
+                animation: 'spin 0.8s linear infinite',
+            },
+            successIcon: {
+                fontSize: '50px',
+                marginBottom: '20px',
+            },
+            errorIcon: {
+                fontSize: '50px',
+                marginBottom: '20px',
+            },
+            errorMessage: {
+                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                padding: '10px',
+                borderRadius: '5px',
+                marginBottom: '20px',
+                fontSize: '14px',
+            },
+            errorBox: {
+                backgroundColor: '#282828',
+                padding: '40px',
+                borderRadius: '10px',
+                textAlign: 'center',
+                maxWidth: '500px',
+            },
+            button: {
+                backgroundColor: '#1db954',
+                color: '#191414',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: '24px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                marginTop: '20px',
+            },
+            header: {
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: '#1db954',
+                padding: '20px 40px',
+                color: '#191414',
+            },
+            userInfo: {
+                display: 'flex',
+                gap: '20px',
+                alignItems: 'center',
+            },
+            avatar: {
+                width: '80px',
+                height: '80px',
+                borderRadius: '50%',
+            },
+            logoutBtn: {
+                backgroundColor: '#191414',
+                color: '#1db954',
+                border: '2px solid #1db954',
+                padding: '10px 20px',
+                borderRadius: '24px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 'bold',
+            },
+            tabs: {
+                display: 'flex',
+                gap: '10px',
+                borderBottom: '1px solid #282828',
+                padding: '0 40px',
+                backgroundColor: '#191414',
+                flexWrap: 'wrap',
+            },
+            tabBtn: {
+                backgroundColor: 'transparent',
+                color: '#b3b3b3',
+                border: 'none',
+                padding: '15px 20px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                borderBottom: '3px solid transparent',
+                transition: 'all 0.3s',
+            },
+            tabBtnActive: {
+                color: '#1db954',
+                borderBottomColor: '#1db954',
+            },
+            content: {
+                padding: '40px',
+                maxWidth: '1200px',
+                margin: '0 auto',
+            },
+            profileGrid: {
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '20px',
+                marginTop: '20px',
+            },
+            profileCard: {
+                backgroundColor: '#282828',
+                padding: '20px',
+                borderRadius: '10px',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+            },
+            label: {
+                color: '#b3b3b3',
+                fontSize: '12px',
+                textTransform: 'uppercase',
+            },
+            value: {
+                fontSize: '24px',
+                fontWeight: 'bold',
+                color: '#1db954',
+            },
+            grid: {
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                gap: '20px',
+                marginTop: '20px',
+            },
+            playlistCard: {
+                backgroundColor: '#282828',
+                padding: '15px',
+                borderRadius: '10px',
+                textDecoration: 'none',
+                color: 'inherit',
+                transition: 'background-color 0.3s',
+            },
+            playlistImage: {
+                width: '100%',
+                height: '150px',
+                objectFit: 'cover',
+                borderRadius: '5px',
+                marginBottom: '10px',
+            },
+            trackCard: {
+                backgroundColor: '#282828',
+                padding: '15px',
+                borderRadius: '10px',
+                textDecoration: 'none',
+                color: 'inherit',
+                transition: 'background-color 0.3s',
+            },
+            trackCardImage: {
+                width: '100%',
+                height: '150px',
+                objectFit: 'cover',
+                borderRadius: '5px',
+                marginBottom: '10px',
+            },
+            trackList: {
+                marginTop: '20px',
+            },
+            trackItem: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '15px',
+                padding: '12px 0',
+                borderBottom: '1px solid #282828',
+                textDecoration: 'none',
+                color: 'inherit',
+                transition: 'background-color 0.3s',
+            },
+            trackIndex: {
+                color: '#b3b3b3',
+                minWidth: '30px',
+                textAlign: 'center',
+                fontSize: '14px',
+            },
+            trackInfo: {
+                flex: 1,
+                minWidth: 0,
+            },
+        };
+
+        // Add CSS animation
+        const styleSheet = document.createElement('style');
+        styleSheet.textContent = `
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(styleSheet);
+
+        // Mount the router
+        const root = ReactDOM.createRoot(document.getElementById('app'));
+        root.render(<Router />);
+    </script>
+
     <script src="./script.js"></script>
 </body>
 </html>
