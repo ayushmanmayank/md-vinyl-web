@@ -12,6 +12,16 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script>
+        (function enforceCanonicalVercelHost() {
+            var legacyHost = 'md-vinyl-web.vercel.app';
+            var canonicalHost = 'md-vinyl-web-eight.vercel.app';
+            if (window.location.hostname === legacyHost) {
+                var target = window.location.protocol + '//' + canonicalHost + window.location.pathname + window.location.search + window.location.hash;
+                window.location.replace(target);
+            }
+        })();
+    </script>
 </head>
 <body>
     <!-- Router Container -->

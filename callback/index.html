@@ -4,6 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Spotify Callback</title>
+  <script>
+    (function enforceCanonicalVercelHost() {
+      var legacyHost = 'md-vinyl-web.vercel.app';
+      var canonicalHost = 'md-vinyl-web-eight.vercel.app';
+      if (window.location.hostname === legacyHost) {
+        var target = window.location.protocol + '//' + canonicalHost + window.location.pathname + window.location.search + window.location.hash;
+        window.location.replace(target);
+      }
+    })();
+  </script>
 </head>
 <body>
   <main style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#121212;color:#fff;font-family:Segoe UI,Arial,sans-serif;">
@@ -14,7 +24,7 @@
   </main>
 
   <script type="module">
-    import { exchangeCodeForToken, verifyOAuthState } from '../src/spotify/auth.js';
+    const { exchangeCodeForToken, verifyOAuthState } = await import('../src/spotify/auth.js');
 
     const statusEl = document.getElementById('status');
 
